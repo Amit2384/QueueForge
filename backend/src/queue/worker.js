@@ -1,11 +1,19 @@
 require("dotenv").config();
+const fs = require("fs");
+const path = require("path");
 const mongoose = require("mongoose");
 const { Worker } = require("bullmq");
 const { connection } = require("./connection");
 const { deadLetterQueue } = require("./queues");
 const Job = require("../models/Job");
+const sharp = require("sharp");
 
 const MONGO_URL = process.env.MONGO_URL || "mongodb://localhost:27017/queueforge";
+const OUTPUT_DIR = process.env.OUTPUT_DIR || path.join(__dirname, "../../output");
+
+if (!fs.existsSync(OUTPUT_DIR)) {
+  fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+}
 
 async function connectMongo() {
   await mongoose.connect(MONGO_URL);
@@ -13,21 +21,55 @@ async function connectMongo() {
 }
 
 /**
- * Simulated job processor. Real job "types" would branch on job.name here
- * (e.g. send-email, resize-image, generate-report). To keep this a
- * self-contained demo, every job has a random chance of failure so the
- * retry + dead-letter path is actually exercised.
+ * Real job processor: downloads an image from a URL and resizes it with
+ * sharp. This is a genuine background-job use case (thumbnail generation,
+ * avatar processing, etc.) - failures here are real, not simulated:
+ * a bad URL, a non-image response, or a network timeout will legitimately
+ * throw and trigger the retry/dead-letter path.
  */
-async function processJob(job) {
-  const { failureRate = 0.35, durationMs = 800 } = job.data.payload || {};
+async function processResizeImageJob(job) {
+  const { imageUrl, width = 300 } = job.data.payload || {};
 
-  await new Promise((resolve) => setTimeout(resolve, durationMs));
-
-  if (Math.random() < failureRate) {
-    throw new Error(`Simulated failure processing job "${job.name}"`);
+  if (!imageUrl) {
+    throw new Error("payload.imageUrl is required for a resize-image job");
   }
 
-  return { processedAt: new Date().toISOString(), jobName: job.name };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10000);
+
+  let response;
+  try {
+    response = await fetch(imageUrl, { signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
+  }
+
+  if (!response.ok) {
+    throw new Error(`Failed to download image: HTTP ${response.status}`);
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.startsWith("image/")) {
+    throw new Error(`URL did not return an image (content-type: ${contentType || "unknown"})`);
+  }
+
+  const inputBuffer = Buffer.from(await response.arrayBuffer());
+
+  const outputFilename = `${job.id}.jpg`;
+  const outputPath = path.join(OUTPUT_DIR, outputFilename);
+
+  const info = await sharp(inputBuffer)
+    .resize({ width: Number(width) })
+    .jpeg({ quality: 82 })
+    .toFile(outputPath);
+
+  return {
+    outputFile: outputFilename,
+    outputWidth: info.width,
+    outputHeight: info.height,
+    originalBytes: inputBuffer.length,
+    outputBytes: info.size,
+  };
 }
 
 async function updateAuditRecord(bullJobId, update, historyNote) {
@@ -46,7 +88,7 @@ async function main() {
     "jobs",
     async (job) => {
       await updateAuditRecord(job.id, { status: "active", attemptsMade: job.attemptsMade + 1 }, "Picked up by worker");
-      const result = await processJob(job);
+      const result = await processResizeImageJob(job);
       return result;
     },
     {
@@ -90,3 +132,4 @@ main().catch((err) => {
   console.error("[worker] fatal error", err);
   process.exit(1);
 });
+

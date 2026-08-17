@@ -34,6 +34,9 @@ services:
       PORT: 4000
       MONGO_URL: mongodb://mongo:27017/queueforge
       REDIS_URL: redis://redis:6379
+      OUTPUT_DIR: /app/output
+    volumes:
+      - job-output:/app/output
     ports:
       - "4000:4000"
     depends_on:
@@ -50,6 +53,9 @@ services:
     environment:
       MONGO_URL: mongodb://mongo:27017/queueforge
       REDIS_URL: redis://redis:6379
+      OUTPUT_DIR: /app/output
+    volumes:
+      - job-output:/app/output
     depends_on:
       mongo:
         condition: service_healthy
@@ -70,3 +76,4 @@ services:
 
 volumes:
   mongo-data:
+  job-output:

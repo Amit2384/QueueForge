@@ -10,6 +10,12 @@ const STATUS_COLORS = {
   "dead-letter": "#7c3aed",
 };
 
+const SAMPLE_URLS = [
+  "https://picsum.photos/id/237/1200/800",
+  "https://picsum.photos/id/1015/1200/800",
+  "https://picsum.photos/id/1025/1200/800",
+];
+
 function StatCard({ label, value, color }) {
   return (
     <div style={{ ...styles.statCard, borderTop: `3px solid ${color}` }}>
@@ -31,7 +37,8 @@ export default function App() {
   const [jobs, setJobs] = useState([]);
   const [stats, setStats] = useState({});
   const [submitting, setSubmitting] = useState(false);
-  const [failureRate, setFailureRate] = useState(35);
+  const [imageUrl, setImageUrl] = useState(SAMPLE_URLS[0]);
+  const [width, setWidth] = useState(400);
   const [error, setError] = useState(null);
 
   const fetchData = useCallback(async () => {
@@ -62,8 +69,8 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: "demo-task",
-          payload: { failureRate: failureRate / 100, durationMs: 1000 },
+          name: "resize-image",
+          payload: { imageUrl, width },
           maxAttempts: 3,
         }),
       });
@@ -79,7 +86,7 @@ export default function App() {
     <div style={styles.page}>
       <header style={styles.header}>
         <h1 style={styles.title}>QueueForge</h1>
-        <p style={styles.subtitle}>Distributed job scheduler — live dashboard</p>
+        <p style={styles.subtitle}>Distributed job scheduler — real image-resizing workload</p>
       </header>
 
       {error && <div style={styles.error}>⚠ {error} — is the API running?</div>}
@@ -94,18 +101,41 @@ export default function App() {
 
       <section style={styles.submitBox}>
         <label style={styles.label}>
-          Simulated failure rate: {failureRate}%
+          Image URL
           <input
-            type="range"
-            min="0"
-            max="90"
-            value={failureRate}
-            onChange={(e) => setFailureRate(Number(e.target.value))}
-            style={styles.slider}
+            type="text"
+            value={imageUrl}
+            onChange={(e) => setImageUrl(e.target.value)}
+            placeholder="https://example.com/photo.jpg"
+            style={styles.input}
           />
         </label>
-        <button onClick={submitJob} disabled={submitting} style={styles.button}>
-          {submitting ? "Submitting…" : "Submit Job"}
+        <label style={{ ...styles.label, flex: "0 0 140px" }}>
+          Target width (px)
+          <input
+            type="number"
+            value={width}
+            onChange={(e) => setWidth(e.target.value)}
+            style={styles.input}
+          />
+        </label>
+        <button onClick={submitJob} disabled={submitting || !imageUrl} style={styles.button}>
+          {submitting ? "Submitting…" : "Resize Image"}
+        </button>
+      </section>
+
+      <section style={styles.sampleRow}>
+        <span style={styles.sampleLabel}>Try a sample:</span>
+        {SAMPLE_URLS.map((url) => (
+          <button key={url} onClick={() => setImageUrl(url)} style={styles.sampleButton}>
+            Sample {SAMPLE_URLS.indexOf(url) + 1}
+          </button>
+        ))}
+        <button
+          onClick={() => setImageUrl("https://example.com/this-is-not-an-image")}
+          style={{ ...styles.sampleButton, borderColor: "#ef4444", color: "#ef4444" }}
+        >
+          Bad URL (test retry)
         </button>
       </section>
 
@@ -113,7 +143,7 @@ export default function App() {
         <table style={styles.table}>
           <thead>
             <tr>
-              <th style={styles.th}>Job</th>
+              <th style={styles.th}>Output</th>
               <th style={styles.th}>Status</th>
               <th style={styles.th}>Attempts</th>
               <th style={styles.th}>Submitted</th>
@@ -123,7 +153,17 @@ export default function App() {
           <tbody>
             {jobs.map((job) => (
               <tr key={job._id}>
-                <td style={styles.td}>{job.name}</td>
+                <td style={styles.td}>
+                  {job.status === "completed" && job.result?.outputFile ? (
+                    <img
+                      src={`${API_URL}/output/${job.result.outputFile}`}
+                      alt="resized output"
+                      style={styles.thumb}
+                    />
+                  ) : (
+                    <span style={styles.thumbPlaceholder}>—</span>
+                  )}
+                </td>
                 <td style={styles.td}><StatusBadge status={job.status} /></td>
                 <td style={styles.td}>{job.attemptsMade} / {job.maxAttempts}</td>
                 <td style={styles.td}>{new Date(job.createdAt).toLocaleTimeString()}</td>
@@ -133,7 +173,7 @@ export default function App() {
               </tr>
             ))}
             {jobs.length === 0 && (
-              <tr><td style={styles.td} colSpan={5}>No jobs yet — submit one above.</td></tr>
+              <tr><td style={styles.td} colSpan={5}>No jobs yet — submit an image above.</td></tr>
             )}
           </tbody>
         </table>
@@ -152,13 +192,19 @@ const styles = {
   statCard: { flex: "1 1 140px", background: "#f9fafb", borderRadius: 8, padding: "14px 16px" },
   statValue: { fontSize: 26, fontWeight: 700 },
   statLabel: { color: "#6b7280", fontSize: 13, marginTop: 2 },
-  submitBox: { display: "flex", alignItems: "center", gap: 20, background: "#f9fafb", padding: 16, borderRadius: 8, marginBottom: 24 },
-  label: { display: "flex", flexDirection: "column", fontSize: 14, color: "#374151", flex: 1 },
-  slider: { marginTop: 8 },
-  button: { background: "#2563eb", color: "#fff", border: "none", padding: "10px 18px", borderRadius: 6, cursor: "pointer", fontSize: 14, fontWeight: 600 },
+  submitBox: { display: "flex", alignItems: "flex-end", gap: 16, background: "#f9fafb", padding: 16, borderRadius: 8, marginBottom: 12, flexWrap: "wrap" },
+  label: { display: "flex", flexDirection: "column", fontSize: 13, color: "#374151", flex: 1, minWidth: 220, gap: 6 },
+  input: { padding: "8px 10px", borderRadius: 6, border: "1px solid #d1d5db", fontSize: 14 },
+  button: { background: "#2563eb", color: "#fff", border: "none", padding: "10px 18px", borderRadius: 6, cursor: "pointer", fontSize: 14, fontWeight: 600, height: 38 },
+  sampleRow: { display: "flex", alignItems: "center", gap: 8, marginBottom: 24, flexWrap: "wrap" },
+  sampleLabel: { fontSize: 13, color: "#6b7280" },
+  sampleButton: { background: "#fff", border: "1px solid #d1d5db", color: "#374151", borderRadius: 999, padding: "4px 12px", fontSize: 13, cursor: "pointer" },
   tableWrap: { overflowX: "auto" },
   table: { width: "100%", borderCollapse: "collapse" },
   th: { textAlign: "left", padding: "10px 12px", borderBottom: "2px solid #e5e7eb", fontSize: 13, color: "#6b7280" },
-  td: { padding: "10px 12px", borderBottom: "1px solid #f3f4f6", fontSize: 14 },
+  td: { padding: "10px 12px", borderBottom: "1px solid #f3f4f6", fontSize: 14, verticalAlign: "middle" },
   badge: { color: "#fff", padding: "2px 10px", borderRadius: 999, fontSize: 12, fontWeight: 600, textTransform: "capitalize" },
+  thumb: { width: 64, height: 44, objectFit: "cover", borderRadius: 4, border: "1px solid #e5e7eb" },
+  thumbPlaceholder: { color: "#9ca3af" },
 };
+

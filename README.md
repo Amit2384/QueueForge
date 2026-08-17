@@ -5,14 +5,18 @@ built to demonstrate a full DevOps pipeline on top of a MERN-style stack.
 
 ## What it does
 
-- Submit jobs through a REST API or the React dashboard
+- **Submit a real job**: paste an image URL and a target width, and QueueForge
+  downloads the image and resizes it in the background — a genuine
+  thumbnail-generation workload, not a simulation
 - Jobs are processed asynchronously by a pool of workers (BullMQ + Redis)
-- Failed jobs are retried automatically with exponential backoff
+- Failed jobs (bad URL, non-image response, network timeout) are retried
+  automatically with exponential backoff
 - Jobs that exhaust all retry attempts are moved to a **dead-letter queue**
   instead of disappearing, so they can be inspected or replayed
 - Every job's full lifecycle (submitted → active → completed/failed/dead-letter)
   is persisted to MongoDB for history and auditing
-- The dashboard polls live job counts and statuses
+- The dashboard shows live job status and the actual resized output thumbnail
+  once a job completes
 
 ## Architecture
 
@@ -30,7 +34,9 @@ built to demonstrate a full DevOps pipeline on top of a MERN-style stack.
                              ▼                │
                       ┌─────────────┐         │
                       │   Worker     │─────────┘
-                      │  (retries +  │  (on exhaustion)
+                      │ (downloads,  │  (on exhaustion)
+                      │  resizes,    │
+                      │  retries +   │
                       │  dead-letter)│
                       └─────────────┘
 ```
@@ -46,7 +52,9 @@ docker compose up --build
 - API health check: http://localhost:4000/health
 
 This spins up 5 containers: `frontend`, `api`, `worker`, `mongo`, `redis` —
-each service isolated, wired together, and independently restartable.
+each service isolated, wired together, and independently restartable. The
+API and worker share a Docker volume so resized images written by the
+worker are immediately servable by the API.
 
 ## Running without Docker (local dev)
 
@@ -67,6 +75,14 @@ npm install
 npm run dev          # http://localhost:5173
 ```
 
+## Trying it out
+
+Paste any direct image URL (or use one of the sample buttons) and a target
+width, then click **Resize Image**. Watch the job move through
+waiting → active → completed, and see the real resized thumbnail appear in
+the table. Click **Bad URL (test retry)** to see the retry + dead-letter
+path trigger on a genuine failure.
+
 ## CI/CD
 
 `.github/workflows/ci.yml` runs on every push/PR to `main`:
@@ -79,6 +95,7 @@ npm run dev          # http://localhost:5173
 
 ## Tech stack
 
-**Backend:** Node.js, Express, BullMQ, Redis, MongoDB/Mongoose
+**Backend:** Node.js, Express, BullMQ, Redis, MongoDB/Mongoose, Sharp
 **Frontend:** React, Vite
 **Infra:** Docker, Docker Compose, GitHub Actions, Nginx
+
